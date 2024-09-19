@@ -1,0 +1,72 @@
+function [ G,T,t_step,t ] = rad calc( data source,sheet,page,plots,start time )
+%This file is used to calculate the solar radiation given voltage, current
+%and temperature provided by the solar radiation sensors
+%Nicholas Barry 13 July 2015
+%INPUTS: data source = string name of source 'CSV' or 'excel'
+% sheet = name of excel sheet for information
+% page = name of excel sheet page for information
+% plots = 'Y' for plots on, O/W plots are off
+% start time = start time for panel measurements
+%(military time) (hours)
+%OUTPUTS:
+% G = solar radiation vector (w/mˆ2)
+% T = temperature vector (kelvin)
+% t step = time of sample iteration (s)
+% t = time vector (s)
+run panel_info_adafruit.m; %load panel information
+%select correct data source
+if strcmp('excel',data_source) == 1
+run datareading21.m; %load measured values from excel
+elseif strcmp('CSV',data_source) == 1
+run data import.m; %load measured values from csv file
+else
+error('No data source selected ! ')
+end
+hf=3600; %seconds to hour conversion factor
+P=I.*V; %calculates power output of panel (watts)
+%reverse saturation current of the diode (constant for panel)
+Io_ref=I_scT1/(exp((q*V_ocT1)/(n*k*T1))-1);
+K=t_min; %initialize time step
+h=1; %initialize index variable
+for K=1:1:size(t,1)
+%calculates the bandgap energy
+E_g(h)=1.16-.000702*(T(h).^2)./(T(h)-1108);
+I_phT1=I_scT1*(G_ref/1000);
+a=(I_scT2- I_scT1)/I_scT1*1/(T2-T1);
+%reverse breakdown current
+Io(h)=Io_ref*((T(h)/T1)^(3/n))*exp((1/T(h)-1/T1)*(-q*E_g(h))/(n*k));
+Vt_T1=(k*T1) / q;
+X=Io(h)/(n*Vt_T1)*exp(V_ocT1/(n*Vt_T1)); % X is use to simplify line below
+dvdi_Voc=-1.15/Ns /2; %slope from I-V curve to T ref
+Rs=-dvdi_Voc- 1/X; %calculates series resistance of each cell
+Id(h)=Io(h)*(exp((q*((V(h))/Ns+(Rs*I(h))/Ns))/(n*k*T(h)))-1);
+Iph(h)=I(h)+Id(h)+(V(h)+I(h)*Rs); %photon current
+%solves for insolation value
+G(h)=(G_ref*Iph(h))/(I_scT1*(1+a*(T(h)-T1)))*ef;
+K=K+t_step; %increment time step
+h=h+1; %increment index variable
+end
+time=transpose(t); %transpose time vector for plotting
+%%
+%this section uses data interpolation to creat a polynomial equation for
+%the insolation verses time.
+poly=6; %set order of polynomial approximation
+[p,mu]=polyfit(time,G,poly); %create polynomial fit to data
+O=polyval(p,time); %evaluate polynomial over input range
+%calculate accumulated values of power and solar radiation
+accum_P=cumsum(P*t_step/3600);
+accum_G=cumsum(G*t_step/3600);
+total_P=accum_P(end,:);
+total_G=accum_G(:,end);
+fprintf('The total power produced by the meter panel was %g Watts \n',...
+total_P)
+fprintf('\n')
+fprintf('The total Solar Radiation for the day was %g w/mˆ2 \n',total_G)
+fprintf('\n')
+if plots == 'Y'
+    run solar meter plots.m
+else
+    return
+end
+%end of file
+end
